@@ -1,0 +1,132 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wwf-app
+  namespace: wwf
+  labels:
+    app: wwf-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: wwf-app
+  template:
+    metadata:
+      labels:
+        app: wwf-app
+    spec:
+      initContainers:
+      - name: wait-for-postgres
+        image: postgres:15-alpine
+        command:
+        - sh
+        - -c
+        - |
+          until pg_isready -h postgres-service -p 5432 -U wwfuser; do
+            echo "Waiting for postgres...";
+            sleep 2;
+          done;
+        env:
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: wwf-secrets
+              key: db-password
+      - name: wait-for-kafka
+        image: confluentinc/cp-kafka:7.4.0
+        command:
+        - sh
+        - -c
+        - |
+          until kafka-broker-api-versions --bootstrap-server kafka-service:9092; do
+            echo "Waiting for kafka...";
+            sleep 2;
+          done;
+      containers:
+      - name: wwf-app
+        image: wwf-application:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+        env:
+        - name: SPRING_PROFILES_ACTIVE
+          value: prod
+        - name: DB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: wwf-secrets
+              key: db-username
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: wwf-secrets
+              key: db-password
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: kafka-service:9092
+        volumeMounts:
+        - name: config-volume
+          mountPath: /app/config
+        livenessProbe:
+          httpGet:
+            path: /wwf/actuator/health
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /wwf/actuator/health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+      volumes:
+      - name: config-volume
+        configMap:
+          name: wwf-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wwf-app-service
+  namespace: wwf
+  labels:
+    app: wwf-app
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: wwf-app
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: wwf-app-ingress
+  namespace: wwf
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: wwf.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: wwf-app-service
+            port:
+              number: 80

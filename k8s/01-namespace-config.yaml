@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: wwf
+  labels:
+    name: wwf
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wwf-config
+  namespace: wwf
+data:
+  application.properties: |
+    server.port=8080
+    server.servlet.context-path=/wwf
+    spring.application.name=WWF Wildlife Conservation Application
+    
+    # Database Configuration
+    spring.datasource.url=jdbc:postgresql://postgres-service:5432/wwfdb
+    spring.datasource.username=wwfuser
+    spring.datasource.password=wwfpassword
+    spring.datasource.driver-class-name=org.postgresql.Driver
+    
+    # JPA Configuration
+    spring.jpa.database-platform=org.hibernate.dialect.PostgreSQLDialect
+    spring.jpa.hibernate.ddl-auto=validate
+    spring.jpa.show-sql=false
+    
+    # Kafka Configuration
+    spring.kafka.bootstrap-servers=kafka-service:9092
+    spring.kafka.consumer.group-id=wwf-application
+    
+    # Actuator
+    management.endpoints.web.exposure.include=health,info,metrics
+    management.endpoint.health.show-details=always
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: wwf-secrets
+  namespace: wwf
+type: Opaque
+data:
+  # base64 encoded values
+  # echo -n 'wwfuser' | base64 -> d3dmdXNlcg==
+  # echo -n 'wwfpassword' | base64 -> d3dmcGFzc3dvcmQ=
+  db-username: d3dmdXNlcg==
+  db-password: d3dmcGFzc3dvcmQ=
